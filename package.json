@@ -1,0 +1,35 @@
+{
+  "name": "claude-code-web-api",
+  "version": "1.0.0",
+  "description": "Web API for Claude Code non-interactive execution",
+  "main": "src/server.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/dev-server.ts",
+    "dev:original": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "start:dev": "tsx src/dev-server.ts",
+    "test": "node --test test/**/*.test.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "@hono/zod-validator": "^0.2.0",
+    "cron": "^3.1.0",
+    "dotenv": "^17.2.3",
+    "hono": "^4.0.0",
+    "nanoid": "^5.0.0",
+    "shell-quote": "^1.8.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "@types/shell-quote": "^1.7.5",
+    "prettier": "^3.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.0.0"
+  }
+}
