@@ -85,6 +85,9 @@ export class ClaudeExecutor {
     const taskDir = join(this.tempDir, taskId);
     await mkdir(taskDir, { recursive: true });
 
+    // Save request for persistence
+    await writeFile(join(taskDir, "request.json"), JSON.stringify(request, null, 2), "utf-8");
+
     return {
       taskId,
       request,
@@ -307,6 +310,91 @@ export class ClaudeExecutor {
     // Clean up temporary files if needed
     // We keep the output file for debugging purposes
     console.log(`Task ${context.taskId} completed. Output saved to ${context.outputFile}`);
+  }
+
+  async getTaskResult(taskId: string): Promise<TaskResponse | null> {
+    const taskDir = join(this.tempDir, taskId);
+    const requestPath = join(taskDir, "request.json");
+    const outputPath = join(taskDir, "output.json");
+
+    // Check if task directory exists
+    try {
+      await stat(taskDir);
+    } catch {
+      return null;
+    }
+
+    // Try to read request metadata
+    let request: TaskRequest | undefined;
+    try {
+      const requestContent = await readFile(requestPath, "utf-8");
+      request = JSON.parse(requestContent);
+    } catch {
+      // If request file is missing, we can't reconstruct full metadata
+    }
+
+    // Check for output file
+    try {
+      const outputContent = await readFile(outputPath, "utf-8");
+
+      // Parse output
+      const lines = outputContent.trim().split("\n");
+      const messages: any[] = [];
+
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const parsed = JSON.parse(line);
+            messages.push(parsed);
+          } catch {
+            // Skip non-JSON lines
+          }
+        }
+      }
+
+      // Find the result message - it has type="result"
+      const result = messages.findLast((m) => m.type === "result");
+
+      // Get file stats for timing
+      const stats = await stat(outputPath);
+
+      if (result) {
+        return {
+          taskId,
+          status: "completed",
+          // The result field in the JSON contains the actual output text/data
+          result: result.result,
+          executionMetrics: {
+            durationMs: result.duration_ms || 0,
+            numTurns: result.num_turns || 0,
+            totalCostUsd: result.total_cost_usd || 0,
+            permissionDenials: (result.permission_denials || []).length,
+          },
+          createdAt: stats.birthtime.toISOString(),
+          startedAt: stats.birthtime.toISOString(),
+          completedAt: stats.mtime.toISOString(),
+          metadata: request?.metadata,
+        };
+      } else {
+        return {
+          taskId,
+          status: "failed",
+          error: "Task completed but no result found in output",
+          createdAt: stats.birthtime.toISOString(),
+          metadata: request?.metadata,
+        };
+      }
+
+    } catch (error) {
+      // If output file missing or read failed
+      return {
+        taskId,
+        status: "failed",
+        error: "Task output not found",
+        createdAt: new Date().toISOString(),
+        metadata: request?.metadata,
+      };
+    }
   }
 
   async healthCheck(): Promise<boolean> {

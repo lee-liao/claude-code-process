@@ -218,8 +218,15 @@ class ClaudeCodeWebAPI {
       const taskPromise = this.runningTasks.get(taskId);
 
       if (!taskPromise) {
+        // Check if task exists on disk
+        const persistedTask = await this.executor.getTaskResult(taskId);
+
+        if (persistedTask) {
+          return c.json(persistedTask);
+        }
+
         return c.json<ApiError>({
-          error: "Task not found or completed",
+          error: "Task not found",
           code: "TASK_NOT_FOUND",
           details: { taskId },
         }, 404);
