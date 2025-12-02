@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     git \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
@@ -32,4 +33,4 @@ RUN mkdir -p temp && chmod 777 temp
 EXPOSE 3000
 
 # Start the server
-CMD ["npm", "start"]
+CMD ["node", "dist/server.js"]
