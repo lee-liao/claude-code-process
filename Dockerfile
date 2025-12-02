@@ -1,12 +1,10 @@
 FROM node:20-slim
 
-# Install system dependencies required for Claude Code and build tools
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git \
-    python3 \
-    make \
-    g++ \
+    curl \
     unzip \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
