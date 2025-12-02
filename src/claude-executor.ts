@@ -215,175 +215,138 @@ export class ClaudeExecutor {
     const claudeProcess = spawn(this.claudeExecutablePath, claudeArgs, {
       stdio: ["pipe", "pipe", "pipe"],
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          claudeProcess.kill("SIGTERM");
-          reject(new Error(`Claude execution timed out after ${request.timeoutSeconds} seconds`));
-        }, timeoutMs);
-      });
-
-      // Capture output and error
-      let output = "";
-      let errorOutput = "";
-
-      if(claudeProcess.stdout) {
-        claudeProcess.stdout.on("data", (data) => {
-          output += data.toString();
-        });
-  }
-
-  if(claudeProcess.stderr) {
-    claudeProcess.stderr.on("data", (data) => {
-      errorOutput += data.toString();
+      env,
+      cwd: context.workingDir, // Use repo dir if available
+      shell: isWindows, // Only use shell on Windows
     });
-  }
 
-  // Wait for completion
-  const exitCode = await Promise.race([
-    new Promise<number>((resolve) => {
-      claudeProcess.on("close", (code) => {
-        clearTimeout(timeoutHandle);
-        resolve(code || 0);
+    // Write prompt to stdin
+    if (claudeProcess.stdin) {
+      // Handle potential EPIPE errors if the process exits immediately
+      claudeProcess.stdin.on("error", (err) => {
+        // Ignore EPIPE errors which happen if the process exits early (e.g. auth failure)
+        if ((err as any).code !== "EPIPE") {
+          console.warn("Error writing to Claude stdin:", err);
+        }
       });
+      claudeProcess.stdin.write(promptContent);
+      claudeProcess.stdin.end();
+    }
 
-      claudeProcess.on("error", (error) => {
-        clearTimeout(timeoutHandle);
-        console.error("Claude process error:", error);
-        resolve(1);
+    // Set up timeout
+    const timeoutMs = request.timeoutSeconds * 1000;
+    let timeoutHandle: NodeJS.Timeout;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        claudeProcess.kill("SIGTERM");
+        reject(new Error(`Claude execution timed out after ${request.timeoutSeconds} seconds`));
+      }, timeoutMs);
+    });
+
+    // Capture output and error
+    let output = "";
+    let errorOutput = "";
+
+    if (claudeProcess.stdout) {
+      claudeProcess.stdout.on("data", (data) => {
+        output += data.toString();
       });
-    }),
-    timeoutPromise,
-  ]);
+    }
 
-  if(exitCode !== 0) {
-  const errorMessage = errorOutput || `Claude process exited with code ${exitCode}`;
-  throw new Error(`Claude execution failed: ${errorMessage}`);
-}
+    if (claudeProcess.stderr) {
+      claudeProcess.stderr.on("data", (data) => {
+        errorOutput += data.toString();
+      });
+    }
 
-// Process output and extract result
-return await this.processOutput(output, context);
+    // Wait for completion
+    const exitCode = await Promise.race([
+      new Promise<number>((resolve) => {
+        claudeProcess.on("close", (code) => {
+          clearTimeout(timeoutHandle);
+          resolve(code || 0);
+        });
+
+        claudeProcess.on("error", (error) => {
+          clearTimeout(timeoutHandle);
+          console.error("Claude process error:", error);
+          resolve(1);
+        });
+      }),
+      timeoutPromise,
+    ]);
+
+    if (exitCode !== 0) {
+      const errorMessage = errorOutput || `Claude process exited with code ${exitCode}`;
+      throw new Error(`Claude execution failed: ${errorMessage}`);
+    }
+
+    // Process output and extract result
+    return await this.processOutput(output, context);
   }
 
   private buildClaudeArgs(
-  context: TaskExecutionContext,
-  request: TaskRequest
-): string[] {
-  // Use -p - to read prompt from stdin
-  const args = ["-p", "-"];
+    context: TaskExecutionContext,
+    request: TaskRequest
+  ): string[] {
+    // Use -p - to read prompt from stdin
+    const args = ["-p", "-"];
 
-  // Add user-specified arguments
-  if (request.allowedTools) {
-    args.push("--allowedTools", request.allowedTools);
-  }
-
-  if (request.disallowedTools) {
-    args.push("--disallowedTools", request.disallowedTools);
-  }
-
-  if (request.maxTurns) {
-    args.push("--max-turns", request.maxTurns.toString());
-  }
-
-  if (request.model) {
-    args.push("--model", request.model);
-  }
-
-  if (request.systemPrompt) {
-    args.push("--system-prompt", request.systemPrompt);
-  }
-
-  if (request.appendSystemPrompt) {
-    args.push("--append-system-prompt", request.appendSystemPrompt);
-  }
-
-  if (request.outputSchema) {
-    args.push("--json-schema", JSON.stringify(request.outputSchema));
-  }
-
-  // Add any additional claude args (parse them properly)
-  if (request.claudeArgs) {
-    const parsedArgs = parseShellArgs(request.claudeArgs);
-    const stringArgs = parsedArgs.filter((arg): arg is string => typeof arg === "string");
-    args.push(...stringArgs);
-  }
-
-  // Always add verbose and JSON streaming output
-  args.push("--verbose", "--output-format", "stream-json");
-
-  // Automatically bypass permissions for non-interactive execution
-  args.push("--dangerously-skip-permissions");
-
-  return args;
-}
-
-  private async processOutput(output: string, context: TaskExecutionContext): Promise < any > {
-  // Save raw output
-  await writeFile(context.outputFile, output, "utf-8");
-
-  // Parse line by line
-  const lines = output.trim().split("\n");
-  const messages: any[] = [];
-
-  for(const line of lines) {
-    if (line.trim()) {
-      try {
-        const parsed = JSON.parse(line);
-        messages.push(parsed);
-      } catch {
-        // Skip non-JSON lines
-      }
+    // Add user-specified arguments
+    if (request.allowedTools) {
+      args.push("--allowedTools", request.allowedTools);
     }
-  }
 
-    const result = messages.findLast((m) => m.type === "result");
-
-  if(!result) {
-    // If no result found, check if there was an error message in the output
-    if (output.includes("Error:")) {
-      throw new Error(`Claude execution error: ${output}`);
+    if (request.disallowedTools) {
+      args.push("--disallowedTools", request.disallowedTools);
     }
-    throw new Error("No result message found in Claude output");
+
+    if (request.maxTurns) {
+      args.push("--max-turns", request.maxTurns.toString());
+    }
+
+    if (request.model) {
+      args.push("--model", request.model);
+    }
+
+    if (request.systemPrompt) {
+      args.push("--system-prompt", request.systemPrompt);
+    }
+
+    if (request.appendSystemPrompt) {
+      args.push("--append-system-prompt", request.appendSystemPrompt);
+    }
+
+    if (request.outputSchema) {
+      args.push("--json-schema", JSON.stringify(request.outputSchema));
+    }
+
+    // Add any additional claude args (parse them properly)
+    if (request.claudeArgs) {
+      const parsedArgs = parseShellArgs(request.claudeArgs);
+      const stringArgs = parsedArgs.filter((arg): arg is string => typeof arg === "string");
+      args.push(...stringArgs);
+    }
+
+    // Always add verbose and JSON streaming output
+    args.push("--verbose", "--output-format", "stream-json");
+
+    // Automatically bypass permissions for non-interactive execution
+    args.push("--dangerously-skip-permissions");
+
+    return args;
   }
 
-    return result;
-}
+  private async processOutput(output: string, context: TaskExecutionContext): Promise<any> {
+    // Save raw output
+    await writeFile(context.outputFile, output, "utf-8");
 
-  private async cleanup(context: TaskExecutionContext): Promise < void> {
-  // Clean up temporary files if needed
-  // We keep the output file for debugging purposes
-  console.log(`Task ${context.taskId} completed. Output saved to ${context.outputFile}`);
-}
-
-  async getTaskResult(taskId: string): Promise < TaskResponse | null > {
-  const taskDir = join(this.tempDir, taskId);
-  const requestPath = join(taskDir, "request.json");
-  const outputPath = join(taskDir, "output.json");
-
-  // Check if task directory exists
-  try {
-    await stat(taskDir);
-  } catch {
-    return null;
-  }
-
-    // Try to read request metadata
-    let request: TaskRequest | undefined;
-  try {
-    const requestContent = await readFile(requestPath, "utf-8");
-    request = JSON.parse(requestContent);
-  } catch {
-    // If request file is missing, we can't reconstruct full metadata
-  }
-
-    // Check for output file
-    try {
-    const outputContent = await readFile(outputPath, "utf-8");
-
-    // Parse output
-    const lines = outputContent.trim().split("\n");
+    // Parse line by line
+    const lines = output.trim().split("\n");
     const messages: any[] = [];
 
-    for(const line of lines) {
+    for (const line of lines) {
       if (line.trim()) {
         try {
           const parsed = JSON.parse(line);
@@ -394,57 +357,116 @@ return await this.processOutput(output, context);
       }
     }
 
+    const result = messages.findLast((m) => m.type === "result");
+
+    if (!result) {
+      // If no result found, check if there was an error message in the output
+      if (output.includes("Error:")) {
+        throw new Error(`Claude execution error: ${output}`);
+      }
+      throw new Error("No result message found in Claude output");
+    }
+
+    return result;
+  }
+
+  private async cleanup(context: TaskExecutionContext): Promise<void> {
+    // Clean up temporary files if needed
+    // We keep the output file for debugging purposes
+    console.log(`Task ${context.taskId} completed. Output saved to ${context.outputFile}`);
+  }
+
+  async getTaskResult(taskId: string): Promise<TaskResponse | null> {
+    const taskDir = join(this.tempDir, taskId);
+    const requestPath = join(taskDir, "request.json");
+    const outputPath = join(taskDir, "output.json");
+
+    // Check if task directory exists
+    try {
+      await stat(taskDir);
+    } catch {
+      return null;
+    }
+
+    // Try to read request metadata
+    let request: TaskRequest | undefined;
+    try {
+      const requestContent = await readFile(requestPath, "utf-8");
+      request = JSON.parse(requestContent);
+    } catch {
+      // If request file is missing, we can't reconstruct full metadata
+    }
+
+    // Check for output file
+    try {
+      const outputContent = await readFile(outputPath, "utf-8");
+
+      // Parse output
+      const lines = outputContent.trim().split("\n");
+      const messages: any[] = [];
+
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const parsed = JSON.parse(line);
+            messages.push(parsed);
+          } catch {
+            // Skip non-JSON lines
+          }
+        }
+      }
+
       // Find the result message - it has type="result"
       const result = messages.findLast((m) => m.type === "result");
 
-    // Get file stats for timing
-    const stats = await stat(outputPath);
+      // Get file stats for timing
+      const stats = await stat(outputPath);
 
-    if(result) {
-      return {
-        taskId,
-        status: "completed",
-        // The result field in the JSON contains the actual output text/data
-        result: result.result,
-        executionMetrics: {
-          durationMs: result.duration_ms || 0,
-          numTurns: result.num_turns || 0,
-          totalCostUsd: result.total_cost_usd || 0,
-          permissionDenials: (result.permission_denials || []).length,
-        },
-        createdAt: stats.birthtime.toISOString(),
-        startedAt: stats.birthtime.toISOString(),
-        completedAt: stats.mtime.toISOString(),
-        metadata: request?.metadata,
-      };
-    } else {
+      if (result) {
+        return {
+          taskId,
+          status: "completed",
+          // The result field in the JSON contains the actual output text/data
+          result: result.result,
+          executionMetrics: {
+            durationMs: result.duration_ms || 0,
+            numTurns: result.num_turns || 0,
+            totalCostUsd: result.total_cost_usd || 0,
+            permissionDenials: (result.permission_denials || []).length,
+          },
+          createdAt: stats.birthtime.toISOString(),
+          startedAt: stats.birthtime.toISOString(),
+          completedAt: stats.mtime.toISOString(),
+          metadata: request?.metadata,
+        };
+      } else {
+        return {
+          taskId,
+          status: "failed",
+          error: "Task completed but no result found in output",
+          createdAt: stats.birthtime.toISOString(),
+          metadata: request?.metadata,
+        };
+      }
+
+    } catch (error) {
+      // If output file missing or read failed
       return {
         taskId,
         status: "failed",
-        error: "Task completed but no result found in output",
-        createdAt: stats.birthtime.toISOString(),
+        error: "Task output not found",
+        createdAt: new Date().toISOString(),
         metadata: request?.metadata,
       };
     }
-
-  } catch(error) {
-    // If output file missing or read failed
-    return {
-      taskId,
-      status: "failed",
-      error: "Task output not found",
-      createdAt: new Date().toISOString(),
-      metadata: request?.metadata,
-    };
   }
-}
 
-  async healthCheck(): Promise < boolean > {
-  try {
-    const { stdout } = await execAsync(`${this.claudeExecutablePath} --version`);
-    return stdout.toLowerCase().includes("claude");
-  } catch {
-    return false;
+  async healthCheck(): Promise<boolean> {
+    try {
+      const { stdout } = await execAsync(`${this.claudeExecutablePath} --version`);
+      return stdout.toLowerCase().includes("claude");
+    } catch {
+      return false;
+    }
   }
-}
 }
