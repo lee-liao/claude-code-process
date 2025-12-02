@@ -7,6 +7,17 @@ services:
     restart: unless-stopped
     ports:
       - "8520:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      # Pass the Anthropic API key from the host environment
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Optional: Enable API authentication
+      - ENABLE_AUTH=${ENABLE_AUTH:-false}
+      - API_KEY=${API_KEY}
+      # Optional: Configure Claude CLI path (default is 'claude' which works globally)
+      - CLAUDE_EXECUTABLE_PATH=claude
       # Persist the temp directory to inspect task outputs
       - ./temp:/app/temp
       # Optional: Mount a directory to allow Claude to access/edit host files
