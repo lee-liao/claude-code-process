@@ -26,8 +26,11 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Create temp directory for tasks
-RUN mkdir -p temp && chmod 777 temp
+# Create temp directory for tasks and set permissions
+RUN mkdir -p temp && chown -R node:node /app
+
+# Switch to non-root user
+USER node
 
 # Expose the port
 EXPOSE 3000
