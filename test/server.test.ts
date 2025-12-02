@@ -19,28 +19,30 @@ class MockClaudeExecutor extends ClaudeExecutor {
     this.delay = delay;
   }
 
-  async executeTask(request: any) {
+  async executeTask(request: any, existingTaskId?: string) {
     if (this.shouldFail) {
       throw new Error("Mock execution failed");
     }
 
     // Simulate execution delay
-    await new Promise(resolve => setTimeout(resolve, this.delay));
+    await new Promise(resolve => setTimeout(resolve, this.delay || 100));
+
+    const taskId = existingTaskId || "mock-task-id";
 
     return {
-      taskId: "mock-task-id",
-      status: "completed",
+      taskId,
+      status: "completed" as const,
       result: {
         type: "result",
         subtype: "completion",
         content: `Mock result for ${request.taskType}`,
         num_turns: 5,
-        duration_ms: this.delay,
+        duration_ms: this.delay || 100,
         total_cost_usd: 0.001,
         permission_denials: 0,
       },
       executionMetrics: {
-        durationMs: this.delay,
+        durationMs: this.delay || 100,
         numTurns: 5,
         totalCostUsd: 0.001,
         permissionDenials: 0,

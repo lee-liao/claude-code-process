@@ -7,14 +7,15 @@ export const TaskRequestSchema = z.object({
   promptFile: z.string().optional(),
   claudeArgs: z.string().optional(),
   model: z.string().optional(),
-  maxTurns: z.number().default(10),
-  allowedTools: z.string().default("Edit,Read,Bash,Write,Grep,WebSearch"),
+  maxTurns: z.number().optional(),
+  allowedTools: z.string().optional(),
   disallowedTools: z.string().optional(),
   systemPrompt: z.string().optional(),
   appendSystemPrompt: z.string().optional(),
   timeoutSeconds: z.number().default(300),
   outputSchema: z.record(z.any()).optional(),
   metadata: z.record(z.any()).optional(),
+  repoUrl: z.string().optional(),
 });
 
 export type TaskRequest = z.infer<typeof TaskRequestSchema>;
@@ -69,6 +70,7 @@ export interface TaskExecutionContext {
   tempDir: string;
   promptPath: string;
   outputFile: string;
+  workingDir?: string;
   startTime: number;
 }
 

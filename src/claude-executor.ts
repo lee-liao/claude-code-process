@@ -4,24 +4,26 @@ import {
   writeFile,
   readFile,
   mkdir,
-  unlink,
   stat
 } from "fs/promises";
-import { createWriteStream, existsSync } from "fs";
+import { existsSync } from "fs";
 import { join } from "path";
 import { parse as parseShellArgs } from "shell-quote";
 import { nanoid } from "nanoid";
 import { TaskRequest, TaskExecutionContext, TaskResponse } from "./types.js";
+import { GitHubService } from "./github-service.js";
 
 const execAsync = promisify(exec);
 
 export class ClaudeExecutor {
   private tempDir: string;
   private claudeExecutablePath: string;
+  private githubService: GitHubService;
 
   constructor(tempDir: string, claudeExecutablePath?: string) {
     this.tempDir = tempDir;
     this.claudeExecutablePath = claudeExecutablePath || "claude";
+    this.githubService = new GitHubService();
 
     // On Windows, if the command is just "claude", append ".cmd"
     if (process.platform === "win32" && this.claudeExecutablePath === "claude") {
@@ -29,8 +31,8 @@ export class ClaudeExecutor {
     }
   }
 
-  async executeTask(request: TaskRequest): Promise<TaskResponse> {
-    const taskId = nanoid();
+  async executeTask(request: TaskRequest, existingTaskId?: string): Promise<TaskResponse> {
+    const taskId = existingTaskId || nanoid();
     const startTime = Date.now();
 
     try {
@@ -85,8 +87,57 @@ export class ClaudeExecutor {
     const taskDir = join(this.tempDir, taskId);
     await mkdir(taskDir, { recursive: true });
 
+    // Resolve defaults from template if not provided
+    if (!request.allowedTools || !request.maxTurns) {
+      const { getTaskTemplate } = await import("./templates.js");
+      const template = getTaskTemplate(request.taskType);
+
+      if (!request.allowedTools) {
+        if (template && template.allowedTools) {
+          request.allowedTools = template.allowedTools;
+        } else {
+          // Fallback default
+          request.allowedTools = "Edit,Read,Bash,Write,Grep,WebSearch";
+        }
+      }
+
+      if (!request.maxTurns) {
+        if (template && template.recommendedMaxTurns) {
+          request.maxTurns = template.recommendedMaxTurns;
+        } else {
+          // Fallback default
+          request.maxTurns = 30;
+        }
+      }
+    }
+
     // Save request for persistence
     await writeFile(join(taskDir, "request.json"), JSON.stringify(request, null, 2), "utf-8");
+
+    let workingDir: string | undefined;
+
+    // Handle Repo Logic
+    if (request.repoUrl) {
+      let branchName = `hotfix-${taskId}`;
+      const baseBranch = "main"; // Default base branch
+
+      try {
+        // Try to create a hotfix branch
+        await this.githubService.createBranch(request.repoUrl, baseBranch, branchName);
+      } catch (error) {
+        console.warn(`Failed to create branch '${branchName}'. Falling back to '${baseBranch}'. Error:`, error);
+        branchName = baseBranch;
+      }
+
+      try {
+        const repoDir = join(taskDir, "repo");
+        await this.githubService.downloadRepo(request.repoUrl, branchName, repoDir);
+        workingDir = repoDir;
+      } catch (error) {
+        console.error("Failed to download repo:", error);
+        throw new Error(`Failed to setup repository: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
 
     return {
       taskId,
@@ -94,6 +145,7 @@ export class ClaudeExecutor {
       tempDir: taskDir,
       promptPath: join(taskDir, "prompt.txt"),
       outputFile: join(taskDir, "output.json"),
+      workingDir,
       startTime: Date.now(),
     };
   }
@@ -156,13 +208,14 @@ export class ClaudeExecutor {
     };
 
     console.log(`Executing Claude command: ${this.claudeExecutablePath} ${claudeArgs.join(" ")}`);
-    console.log(`Environment ANTHROPIC_API_KEY present: ${!!env.ANTHROPIC_API_KEY}`);
+    console.log(`Working Directory: ${context.workingDir || "default"}`);
 
     // Spawn Claude process
     const isWindows = process.platform === "win32";
     const claudeProcess = spawn(this.claudeExecutablePath, claudeArgs, {
       stdio: ["pipe", "pipe", "pipe"],
       env,
+      cwd: context.workingDir, // Use repo dir if available
       shell: isWindows, // Only use shell on Windows
     });
 
@@ -270,6 +323,9 @@ export class ClaudeExecutor {
 
     // Always add verbose and JSON streaming output
     args.push("--verbose", "--output-format", "stream-json");
+
+    // Automatically bypass permissions for non-interactive execution
+    args.push("--dangerously-skip-permissions");
 
     return args;
   }

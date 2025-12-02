@@ -189,11 +189,13 @@ curl -X POST http://localhost:3000/tasks \
   -H "Authorization: Bearer your-api-key" \
   -d '{
     "taskType": "feature-implementation",
-    "prompt": "Add a password reset feature with email verification",
-    "maxTurns": 20,
-    "systemPrompt": "You are a senior backend developer focused on security and scalability."
+    "prompt": "Read openspec/changes/[change-id]/tasks.md and implement all tasks sequentially.",
+	"maxTurns": 20,
+    "repoUrl": "https://github.com/DrLinAITeam2/simplest-repo"
   }'
 ```
+
+
 
 ## Response Format
 

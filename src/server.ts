@@ -334,7 +334,7 @@ class ClaudeCodeWebAPI {
 
   private async executeTaskAsync(taskId: string, taskRequest: TaskRequest): Promise<TaskResponse> {
     try {
-      return await this.executor.executeTask(taskRequest);
+      return await this.executor.executeTask(taskRequest, taskId);
     } catch (error) {
       console.error(`Task ${taskId} failed:`, error);
       const now = new Date().toISOString();

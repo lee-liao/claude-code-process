@@ -284,6 +284,17 @@ export const TASK_TEMPLATES: Record<string, TaskTemplate> = {
         }
       }
     ]
+  },
+
+  "custom": {
+    id: "custom",
+    name: "Custom Task",
+    description: "Custom task with your own prompt and configuration",
+    category: "General",
+    defaultPrompt: "",
+    allowedTools: "Read,Grep,Edit,Write,Bash,WebSearch",
+    recommendedMaxTurns: 20,
+    examples: []
   }
 };
 

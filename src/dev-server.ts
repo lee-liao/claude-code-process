@@ -86,7 +86,7 @@ app.post("/tasks", zValidator("json", TaskRequestSchema), async (c) => {
   tasks.set(taskId, initialResponse);
 
   // Execute task asynchronously
-  executor.executeTask(taskRequest)
+  executor.executeTask(taskRequest, taskId)
     .then(result => {
       // Update task with result
       const completedTask: TaskResponse = {
