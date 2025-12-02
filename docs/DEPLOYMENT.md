@@ -88,3 +88,45 @@ The JSON response should contain:
 - **Permission Denied**: If Claude fails to write to temp files, ensure the `temp` directory permissions are correct (handled in Dockerfile, but good to check).
 - **API Key Error**: Ensure `ANTHROPIC_API_KEY` is correctly set in the `.env` file.
 - **Connection Refused**: Ensure your server's firewall allows traffic on port 8520.
+
+## 6. Critical Configuration
+
+### Non-Root User
+The Docker container runs as the `node` user (UID 1000) instead of `root`. This is required because the Claude CLI refuses to run with `--dangerously-skip-permissions` when executed as root.
+
+### Volume Permissions
+Since the container runs as a non-root user, you must ensure the host directory mounted to `/app/temp` is writable by UID 1000.
+
+Run this command on your host machine before starting the container:
+```bash
+# Create the directory if it doesn't exist
+mkdir -p ./temp
+
+# Set ownership to UID 1000 (node user)
+sudo chown -R 1000:1000 ./temp
+
+# Alternatively, make it world-writable
+sudo chmod -R 777 ./temp
+```
+
+## 7. Debugging
+
+Useful commands for troubleshooting the container:
+
+```bash
+# Access the container shell (as node user)
+docker exec -it claude-web-api bash
+
+# Check environment variables inside container
+docker exec claude-web-api env | grep ANTHROPIC
+
+# View container logs (follow)
+docker logs -f claude-web-api
+
+# Inspect container configuration (e.g. volume mounts)
+docker inspect claude-web-api
+
+# Run Claude manually inside the container (for testing)
+# Note: Navigate to a task directory first if needed
+docker exec -it claude-web-api bash -c "claude -p 'hello' --verbose"
+```

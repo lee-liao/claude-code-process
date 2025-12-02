@@ -1,18 +1,5 @@
 # Claude Code Web API
 
-A Web API server that enables non-interactive execution of Claude Code through HTTP requests. This allows you to integrate Claude Code capabilities into your applications, workflows, and services.
-
-## Features
-
-- **Non-Interactive Execution**: Run Claude Code without user interaction
-- **Predefined Task Templates**: Ready-to-use templates for common tasks
-
-```env
-# Server Configuration
-PORT=3000
-HOST=0.0.0.0
-NODE_ENV=production
-
 # Claude Code Configuration
 CLAUDE_EXECUTABLE_PATH=claude  # Path to Claude CLI executable
 DEFAULT_TIMEOUT=300            # Default timeout in seconds
@@ -221,62 +208,6 @@ curl -X POST http://localhost:3000/tasks \
 ```
 
 PORT=3000
-HOST=0.0.0.0
-ENABLE_AUTH=true
-API_KEY=your-production-api-key
-ANTHROPIC_API_KEY=your-anthropic-api-key
-MAX_CONCURRENT_TASKS=10
-RATE_LIMIT_PER_MINUTE=120
-```
-
-## Security Considerations
-
-1. **API Key Protection**: Always use HTTPS and protect your API keys
-2. **Input Validation**: The API validates all inputs using Zod schemas
-3. **Rate Limiting**: Built-in rate limiting prevents abuse
-4. **Output Sanitization**: Sensitive information is filtered from outputs
-5. **Timeout Protection**: Tasks are automatically terminated after timeout
-6. **Tool Restrictions**: Limit allowed tools for security-sensitive tasks
-
-## Monitoring
-
-### Health Monitoring
-
-- `/health` endpoint for health checks
-- `/stats` endpoint for server statistics
-- Built-in logging with request/response details
-
-### Metrics
-
-- Task execution time
-- API costs tracking
-- Error rates
-- Concurrent task utilization
-- Rate limiting statistics
-
-## Troubleshooting
-
-### Claude Code Not Found
-
-Ensure Claude Code is installed and accessible:
-```bash
-claude --version
-```
-
-### Authentication Issues
-
-Check your Anthropic API key is set correctly:
-```bash
-echo $ANTHROPIC_API_KEY
-```
-
-### Permission Errors
-
-Ensure the temporary directory is writable:
-```bash
-mkdir -p ./temp
-chmod 755 ./temp
-```
 
 ### Task Timeouts
 
