@@ -196,7 +196,7 @@ app.post("/tasks", async (c) => {
 });
 
 // Get task status
-app.get("/tasks/:taskId", (c) => {
+app.get("/tasks/:taskId", async (c) => {
   const taskId = c.req.param("taskId");
 
   if (!taskId) {
@@ -206,16 +206,75 @@ app.get("/tasks/:taskId", (c) => {
     }, 400);
   }
 
+  // First check in-memory storage
   const task = tasks.get(taskId);
-  if (!task) {
-    return c.json<ApiError>({
-      error: "Task not found",
-      code: "TASK_NOT_FOUND",
-      details: { taskId },
-    }, 404);
+  if (task) {
+    return c.json(task);
   }
 
-  return c.json(task);
+  // Check on disk for persisted tasks
+  const { stat } = await import('fs/promises');
+  const taskDir = join("./temp", taskId);
+  const outputPath = join(taskDir, "output.json");
+  const requestPath = join(taskDir, "request.json");
+
+  try {
+    await stat(taskDir);
+
+    // Read output file
+    const outputContent = await readFile(outputPath, "utf-8");
+    const lines = outputContent.trim().split("\n");
+    const messages: any[] = [];
+
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          messages.push(JSON.parse(line));
+        } catch {
+          // Skip non-JSON lines
+        }
+      }
+    }
+
+    const result = messages.findLast((m) => m.type === "result");
+    const stats = await stat(outputPath);
+
+    // Try to read request for metadata
+    let metadata: any = undefined;
+    try {
+      const requestContent = await readFile(requestPath, "utf-8");
+      const request = JSON.parse(requestContent);
+      metadata = request.metadata;
+    } catch {
+      // Ignore if request file is missing
+    }
+
+    if (result) {
+      return c.json({
+        taskId,
+        status: "completed",
+        result: result.result,
+        executionMetrics: {
+          durationMs: result.duration_ms || 0,
+          numTurns: result.num_turns || 0,
+          totalCostUsd: result.total_cost_usd || 0,
+          permissionDenials: (result.permission_denials || []).length,
+        },
+        createdAt: stats.birthtime.toISOString(),
+        startedAt: stats.birthtime.toISOString(),
+        completedAt: stats.mtime.toISOString(),
+        metadata,
+      });
+    }
+  } catch {
+    // Task not found on disk either
+  }
+
+  return c.json<ApiError>({
+    error: "Task not found",
+    code: "TASK_NOT_FOUND",
+    details: { taskId },
+  }, 404);
 });
 
 // API documentation

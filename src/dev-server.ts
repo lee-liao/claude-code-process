@@ -115,7 +115,7 @@ app.post("/tasks", zValidator("json", TaskRequestSchema), async (c) => {
 });
 
 // Get task status
-app.get("/tasks/:taskId", (c) => {
+app.get("/tasks/:taskId", async (c) => {
   const taskId = c.req.param("taskId");
   if (!taskId) {
     return c.json<ApiError>({
@@ -124,16 +124,23 @@ app.get("/tasks/:taskId", (c) => {
     }, 400);
   }
 
+  // First check in-memory storage
   const task = tasks.get(taskId);
-  if (!task) {
-    return c.json<ApiError>({
-      error: "Task not found",
-      code: "TASK_NOT_FOUND",
-      details: { taskId },
-    }, 404);
+  if (task) {
+    return c.json(task);
   }
 
-  return c.json(task);
+  // Check on disk for persisted tasks
+  const persistedTask = await executor.getTaskResult(taskId);
+  if (persistedTask) {
+    return c.json(persistedTask);
+  }
+
+  return c.json<ApiError>({
+    error: "Task not found",
+    code: "TASK_NOT_FOUND",
+    details: { taskId },
+  }, 404);
 });
 
 // Cancel task
