@@ -16,6 +16,12 @@ export const TaskRequestSchema = z.object({
   outputSchema: z.record(z.any()).optional(),
   metadata: z.record(z.any()).optional(),
   repoUrl: z.string().optional(),
+  githubTarget: z.object({
+    owner: z.string().optional(),
+    repoName: z.string(),
+    description: z.string().optional(),
+    isPrivate: z.boolean().default(false),
+  }).optional(),
 });
 
 export type TaskRequest = z.infer<typeof TaskRequestSchema>;
@@ -71,6 +77,7 @@ export interface TaskExecutionContext {
   promptPath: string;
   outputFile: string;
   workingDir?: string;
+  featureBranch?: string; // The branch created for this task's changes
   startTime: number;
 }
 

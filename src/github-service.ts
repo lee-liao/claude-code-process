@@ -63,7 +63,7 @@ export class GitHubService {
         }
     }
 
-    async downloadRepo(repoUrl: string, branch: string, targetDir: string): Promise<void> {
+    async downloadRepo(repoUrl: string, branch: string, targetDir: string): Promise<string> {
         const { owner, repo } = this.parseRepoUrl(repoUrl);
         console.log(`Downloading repo '${owner}/${repo}' (ref: ${branch}) to '${targetDir}'...`);
 
@@ -112,8 +112,110 @@ export class GitHubService {
             }
 
             console.log("Unzip complete.");
+
+            // GitHub zips extract to a subfolder like 'owner-repo-sha/'
+            // Find this subfolder and return its path as the actual working directory
+            const { readdir } = await import("fs/promises");
+            const entries = await readdir(targetDir, { withFileTypes: true });
+            const extractedFolder = entries.find(e => e.isDirectory() && e.name !== '.' && e.name !== '..');
+
+            if (extractedFolder) {
+                const actualPath = join(targetDir, extractedFolder.name);
+                console.log(`Found extracted folder: ${actualPath}`);
+                return actualPath;
+            }
+
+            // If no subfolder found, return the targetDir
+            return targetDir;
         } catch (error) {
             console.error("Error downloading repo:", error);
+            throw error;
+        }
+    }
+
+    async createRepository(owner: string, repo: string, description: string, isPrivate: boolean): Promise<void> {
+        console.log(`Creating repository '${owner}/${repo}'...`);
+        try {
+            const response = await fetch(`${this.baseUrl}/create-repo`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ owner, repo, description, private: isPrivate })
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed to create repo: ${response.status} ${text}`);
+            }
+            console.log("Repository created successfully.");
+        } catch (error) {
+            console.error("Error creating repo:", error);
+            throw error;
+        }
+    }
+
+    async addFile(owner: string, repo: string, path: string, content: string, branch: string, message: string): Promise<void> {
+        console.log(`Adding file '${path}' to '${owner}/${repo}'...`);
+        try {
+            const response = await fetch(`${this.baseUrl}/add-file`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ owner, repo, path, content, branch, message })
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed to add file: ${response.status} ${text}`);
+            }
+            console.log("File added successfully.");
+        } catch (error) {
+            console.error("Error adding file:", error);
+            throw error;
+        }
+    }
+
+    async createPullRequest(owner: string, repo: string, title: string, body: string, head: string, base: string): Promise<void> {
+        console.log(`Creating PR '${title}' (${head} -> ${base}) in '${owner}/${repo}'...`);
+        try {
+            const response = await fetch(`${this.baseUrl}/create-pull-request`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ owner, repo, title, body, head, base })
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed to create PR: ${response.status} ${text}`);
+            }
+            console.log("Pull request created successfully.");
+        } catch (error) {
+            console.error("Error creating PR:", error);
+            throw error;
+        }
+    }
+
+    async pushChanges(owner: string, repo: string, message: string, files: Array<{ path: string; content?: string | null; encoding?: string }>, branch: string, parentBranch: string): Promise<void> {
+        console.log(`Pushing ${files.length} changes to '${owner}/${repo}'...`);
+        try {
+            const response = await fetch(`${this.baseUrl}/push-changes`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    owner,
+                    repo,
+                    commitMessage: message,
+                    files,
+                    branch,
+                    parentBranch
+                })
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed to push changes: ${response.status} ${text}`);
+            }
+            console.log("Changes pushed successfully.");
+        } catch (error) {
+            console.error("Error pushing changes:", error);
             throw error;
         }
     }
