@@ -15,6 +15,10 @@ services:
       - NODE_ENV=production
       # Optional: Configure Claude CLI path (default is 'claude' which works globally)
       - CLAUDE_EXECUTABLE_PATH=claude
+      # Claude Code CLI configuration (all passed via environment)
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
+      - ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
+      - API_TIMEOUT_MS=600000
     volumes:
       # Persist the temp directory to inspect task outputs
       - ./temp:/app/temp
