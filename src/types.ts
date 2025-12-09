@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@hono/zod-openapi";
 
 // Task schema for API requests
 export const TaskRequestSchema = z.object({
@@ -22,7 +22,7 @@ export const TaskRequestSchema = z.object({
     description: z.string().optional(),
     isPrivate: z.boolean().default(false),
   }).optional(),
-});
+}).openapi("TaskRequest");
 
 export type TaskRequest = z.infer<typeof TaskRequestSchema>;
 
@@ -42,9 +42,16 @@ export const TaskResponseSchema = z.object({
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   metadata: z.record(z.any()).optional(),
-});
+}).openapi("TaskResponse");
 
 export type TaskResponse = z.infer<typeof TaskResponseSchema>;
+
+// Api Error Schema
+export const ApiErrorSchema = z.object({
+  error: z.string(),
+  code: z.string(),
+  details: z.record(z.any()).optional(),
+}).openapi("ApiError");
 
 // Predefined task templates
 export interface TaskTemplate {

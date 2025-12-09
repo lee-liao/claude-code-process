@@ -1,15 +1,14 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { swaggerUI } from "@hono/swagger-ui";
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { zValidator } from "@hono/zod-validator";
-import { z } from "zod";
 import { nanoid } from "nanoid";
 import { join } from "path";
 import { mkdir } from "fs/promises";
 import { fileURLToPath } from 'url';
 
-import { TaskRequestSchema, TaskRequest, TaskResponse, ServerConfig, ApiError } from "./types.js";
+import { TaskRequestSchema, TaskRequest, TaskResponse, ServerConfig, ApiError, TaskResponseSchema, ApiErrorSchema } from "./types.js";
 import { ClaudeExecutor } from "./claude-executor.js";
 import { getTaskTemplate, listTaskTemplates, listTaskTemplatesByCategory } from "./templates.js";
 
@@ -27,7 +26,7 @@ const DEFAULT_CONFIG: ServerConfig = {
 };
 
 class ClaudeCodeWebAPI {
-  private app: Hono;
+  private app: OpenAPIHono;
   private executor: ClaudeExecutor;
   private config: ServerConfig;
   private runningTasks: Map<string, Promise<TaskResponse>>;
@@ -39,7 +38,7 @@ class ClaudeCodeWebAPI {
     this.runningTasks = new Map();
     this.rateLimitStore = new Map();
 
-    this.app = new Hono();
+    this.app = new OpenAPIHono();
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -116,7 +115,30 @@ class ClaudeCodeWebAPI {
 
   private setupRoutes(): void {
     // Health check
-    this.app.get("/health", async (c) => {
+    this.app.openapi(createRoute({
+      method: 'get',
+      path: '/health',
+      responses: {
+        200: {
+          description: 'Health status',
+          content: {
+            'application/json': {
+              schema: z.object({
+                status: z.string().openapi({ example: 'healthy' }),
+                timestamp: z.string().datetime(),
+                version: z.string(),
+                activeTasks: z.number(),
+                maxConcurrentTasks: z.number(),
+                tempDir: z.string(),
+              })
+            }
+          }
+        },
+        503: {
+          description: 'Unhealthy service',
+        }
+      }
+    }), async (c) => {
       const isHealthy = await this.executor.healthCheck();
       const activeTasks = this.runningTasks.size;
 
@@ -131,8 +153,29 @@ class ClaudeCodeWebAPI {
     });
 
     // List available task templates
-    this.app.get("/templates", (c) => {
-      const category = c.req.query("category");
+    this.app.openapi(createRoute({
+      method: 'get',
+      path: '/templates',
+      request: {
+        query: z.object({
+          category: z.string().optional().openapi({ param: { name: 'category', in: 'query' } })
+        })
+      },
+      responses: {
+        200: {
+          description: 'List of templates',
+          content: {
+            'application/json': {
+              schema: z.object({
+                templates: z.array(z.any()),
+                category: z.string().optional()
+              })
+            }
+          }
+        }
+      }
+    }), (c) => {
+      const { category } = c.req.valid('query');
 
       if (category) {
         const templatesByCategory = listTaskTemplatesByCategory();
@@ -148,73 +191,153 @@ class ClaudeCodeWebAPI {
     });
 
     // Get specific task template
-    this.app.get("/templates/:taskType", (c) => {
-      const taskType = c.req.param("taskType");
-      if (!taskType) {
-        return c.json<ApiError>({
-          error: "Task type parameter is required",
-          code: "INVALID_PARAMETER",
-        }, 400);
+    this.app.openapi(createRoute({
+      method: 'get',
+      path: '/templates/{taskType}',
+      request: {
+        params: z.object({
+          taskType: z.string().openapi({ param: { name: 'taskType', in: 'path' } })
+        })
+      },
+      responses: {
+        200: {
+          description: 'Task template found',
+          content: {
+            'application/json': {
+              schema: z.any()
+            }
+          }
+        },
+        404: {
+          description: 'Template not found',
+          content: {
+            'application/json': {
+              schema: ApiErrorSchema
+            }
+          }
+        }
       }
+    }), (c) => {
+      const { taskType } = c.req.valid('param');
       const template = getTaskTemplate(taskType);
 
       if (!template) {
-        return c.json<ApiError>({
+        return c.json({
           error: "Task template not found",
           code: "TEMPLATE_NOT_FOUND",
           details: { taskType },
-        }, 404);
+        }, 404) as any;
       }
 
-      return c.json(template);
+      return c.json(template) as any;
     });
 
     // Submit a new task
-    this.app.post(
-      "/tasks",
-      zValidator("json", TaskRequestSchema),
-      async (c) => {
-        const taskRequest = c.req.valid("json") as TaskRequest;
-
-        // Check concurrent task limit
-        if (this.runningTasks.size >= this.config.maxConcurrentTasks) {
-          return c.json<ApiError>({
-            error: "Maximum concurrent tasks reached",
-            code: "CONCURRENT_LIMIT_REACHED",
-            details: {
-              current: this.runningTasks.size,
-              max: this.config.maxConcurrentTasks,
-            },
-          }, 429);
+    this.app.openapi(createRoute({
+      method: 'post',
+      path: '/tasks',
+      request: {
+        body: {
+          content: {
+            'application/json': {
+              schema: TaskRequestSchema
+            }
+          }
         }
-
-        // Create task ID and initial response
-        const taskId = nanoid();
-        const now = new Date().toISOString();
-
-        const initialResponse: TaskResponse = {
-          taskId,
-          status: "pending",
-          createdAt: now,
-          metadata: taskRequest.metadata,
-        };
-
-        // Start task execution asynchronously
-        const taskPromise = this.executeTaskAsync(taskId, taskRequest);
-        this.runningTasks.set(taskId, taskPromise);
-
-        // Clean up completed tasks
-        taskPromise.finally(() => {
-          this.runningTasks.delete(taskId);
-        });
-
-        return c.json(initialResponse, 202);
+      },
+      responses: {
+        202: {
+          description: 'Task accepted',
+          content: {
+            'application/json': {
+              schema: TaskResponseSchema
+            }
+          }
+        },
+        429: {
+          description: 'Too many requests',
+          content: {
+            'application/json': {
+              schema: ApiErrorSchema
+            }
+          }
+        }
       }
-    );
+    }), async (c) => {
+      const taskRequest = c.req.valid('json');
+
+      // Check concurrent task limit
+      if (this.runningTasks.size >= this.config.maxConcurrentTasks) {
+        return c.json({
+          error: "Maximum concurrent tasks reached",
+          code: "CONCURRENT_LIMIT_REACHED",
+          details: {
+            current: this.runningTasks.size,
+            max: this.config.maxConcurrentTasks,
+          },
+        }, 429);
+      }
+
+      // Create task ID and initial response
+      const taskId = nanoid();
+      const now = new Date().toISOString();
+
+      const initialResponse: TaskResponse = {
+        taskId,
+        status: "pending",
+        createdAt: now,
+        metadata: taskRequest.metadata,
+      };
+
+      // Start task execution asynchronously
+      const taskPromise = this.executeTaskAsync(taskId, taskRequest);
+      this.runningTasks.set(taskId, taskPromise);
+
+      // Clean up completed tasks
+      taskPromise.finally(() => {
+        this.runningTasks.delete(taskId);
+      });
+
+      return c.json(initialResponse, 202);
+    });
 
     // Get task status and result
-    this.app.get("/tasks/:taskId", async (c) => {
-      const taskId = c.req.param("taskId");
+    this.app.openapi(createRoute({
+      method: 'get',
+      path: '/tasks/{taskId}',
+      request: {
+        params: z.object({
+          taskId: z.string().openapi({ param: { name: 'taskId', in: 'path' } })
+        })
+      },
+      responses: {
+        200: {
+          description: 'Task status',
+          content: {
+            'application/json': {
+              schema: TaskResponseSchema
+            }
+          }
+        },
+        404: {
+          description: 'Task not found',
+          content: {
+            'application/json': {
+              schema: ApiErrorSchema
+            }
+          }
+        },
+        500: {
+          description: 'Task execution failed',
+          content: {
+            'application/json': {
+              schema: ApiErrorSchema
+            }
+          }
+        }
+      }
+    }), async (c) => {
+      const { taskId } = c.req.valid('param');
       const taskPromise = this.runningTasks.get(taskId);
 
       if (!taskPromise) {
@@ -222,42 +345,72 @@ class ClaudeCodeWebAPI {
         const persistedTask = await this.executor.getTaskResult(taskId);
 
         if (persistedTask) {
-          return c.json(persistedTask);
+          return c.json(persistedTask) as any;
         }
 
-        return c.json<ApiError>({
+        return c.json({
           error: "Task not found",
           code: "TASK_NOT_FOUND",
           details: { taskId },
-        }, 404);
+        }, 404) as any;
       }
 
       try {
         const task = await taskPromise;
-        return c.json(task);
+        return c.json(task) as any;
       } catch (error) {
-        return c.json<ApiError>({
+        return c.json({
           error: "Task execution failed",
           code: "TASK_EXECUTION_FAILED",
           details: {
             taskId,
             error: error instanceof Error ? error.message : String(error),
           },
-        }, 500);
+        }, 500) as any;
       }
     });
 
     // Cancel a running task
-    this.app.delete("/tasks/:taskId", async (c) => {
-      const taskId = c.req.param("taskId");
+    this.app.openapi(createRoute({
+      method: 'delete',
+      path: '/tasks/{taskId}',
+      request: {
+        params: z.object({
+          taskId: z.string().openapi({ param: { name: 'taskId', in: 'path' } })
+        })
+      },
+      responses: {
+        200: {
+          description: 'Task cancelled',
+          content: {
+            'application/json': {
+              schema: z.object({
+                taskId: z.string(),
+                status: z.string().openapi({ example: 'cancelled' }),
+                message: z.string()
+              })
+            }
+          }
+        },
+        404: {
+          description: 'Task not found',
+          content: {
+            'application/json': {
+              schema: ApiErrorSchema
+            }
+          }
+        }
+      }
+    }), async (c) => {
+      const { taskId } = c.req.valid('param');
       const taskPromise = this.runningTasks.get(taskId);
 
       if (!taskPromise) {
-        return c.json<ApiError>({
+        return c.json({
           error: "Task not found",
           code: "TASK_NOT_FOUND",
           details: { taskId },
-        }, 404);
+        }, 404) as any;
       }
 
       // Note: Actual cancellation would require more complex implementation
@@ -268,11 +421,40 @@ class ClaudeCodeWebAPI {
         taskId,
         status: "cancelled",
         message: "Task cancellation requested",
-      });
+      }) as any;
     });
 
     // Get server statistics
-    this.app.get("/stats", async (c) => {
+    this.app.openapi(createRoute({
+      method: 'get',
+      path: '/stats',
+      responses: {
+        200: {
+          description: 'Server statistics',
+          content: {
+            'application/json': {
+              schema: z.object({
+                server: z.object({
+                  version: z.string(),
+                  uptime: z.number(),
+                  healthy: z.boolean()
+                }),
+                tasks: z.object({
+                  running: z.number(),
+                  maxConcurrent: z.number(),
+                  completedToday: z.number()
+                }),
+                system: z.object({
+                  nodeVersion: z.string(),
+                  platform: z.string(),
+                  memory: z.any()
+                })
+              })
+            }
+          }
+        }
+      }
+    }), async (c) => {
       const isHealthy = await this.executor.healthCheck();
 
       return c.json({
@@ -295,27 +477,29 @@ class ClaudeCodeWebAPI {
     });
 
     // API documentation
-    this.app.get("/", (c) => {
-      return c.json({
-        name: "Claude Code Web API",
-        version: "1.0.0",
-        description: "Web API for Claude Code non-interactive execution",
-        endpoints: {
-          "GET /health": "Health check and server status",
-          "GET /templates": "List all available task templates",
-          "GET /templates/:taskType": "Get specific task template",
-          "POST /tasks": "Submit a new task for execution",
-          "GET /tasks/:taskId": "Get task status and result",
-          "DELETE /tasks/:taskId": "Cancel a running task",
-          "GET /stats": "Get server statistics",
+    // API documentation
+    this.app.get('/doc', (c) => {
+      return c.json(this.app.getOpenAPI31Document({
+        openapi: '3.0.0',
+        info: {
+          version: '1.0.0',
+          title: 'Claude Code Web API',
+          description: 'Web API for Claude Code non-interactive execution',
         },
-      });
+      }));
     });
+
+    // Swagger UI
+    this.app.get('/api-docs', swaggerUI({ url: '/doc' }));
+
+    // Redirect root to UI
+    this.app.get('/', (c) => c.redirect('/api-docs'));
 
     // Error handler
     this.app.onError((err, c) => {
       console.error("Unhandled error:", err);
-      return c.json<ApiError>({
+      // @ts-ignore
+      return c.json({
         error: "Internal server error",
         code: "INTERNAL_ERROR",
         details: { error: err.message },
@@ -324,7 +508,8 @@ class ClaudeCodeWebAPI {
 
     // 404 handler
     this.app.notFound((c) => {
-      return c.json<ApiError>({
+      // @ts-ignore
+      return c.json({
         error: "Endpoint not found",
         code: "NOT_FOUND",
         details: { path: c.req.path },
@@ -381,7 +566,7 @@ class ClaudeCodeWebAPI {
     });
   }
 
-  getApp(): Hono {
+  getApp(): OpenAPIHono {
     return this.app;
   }
 }

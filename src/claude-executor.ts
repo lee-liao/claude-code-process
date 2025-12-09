@@ -51,20 +51,17 @@ export class ClaudeExecutor {
       let target = request.githubTarget;
       if (!target && request.repoUrl) {
         try {
-          const urlParts = request.repoUrl.split('/');
-          const repoName = urlParts[urlParts.length - 1].replace('.git', '');
-          // Extract owner: typically https://github.com/OWNER/REPO
-          // Parts: ["https:", "", "github.com", "OWNER", "REPO"]
-          // So owner is index length-2
-          const repoOwner = urlParts.length >= 2 ? urlParts[urlParts.length - 2] : undefined;
+          const { owner, repo } = this.parseDetailedRepoUrl(request.repoUrl);
 
-          target = {
-            owner: repoOwner,
-            repoName: repoName,
-            description: `Auto-generated update for ${repoName}`,
-            isPrivate: false
-          };
-          console.log(`Inferred GitHub target from repoUrl: ${repoName} (Owner: ${repoOwner})`);
+          if (owner && repo) {
+            target = {
+              owner,
+              repoName: repo,
+              description: `Auto-generated update for ${repo}`,
+              isPrivate: false
+            };
+            console.log(`Inferred GitHub target from repoUrl: ${repo} (Owner: ${owner})`);
+          }
         } catch (e) {
           console.warn(`Could not infer repo name from url: ${request.repoUrl}`);
         }
@@ -135,6 +132,42 @@ export class ClaudeExecutor {
     }
   }
 
+  private parseDetailedRepoUrl(urlStr: string): { owner?: string; repo?: string; branch?: string } {
+    try {
+      // Handle simple case: owner/repo
+      if (!urlStr.includes("://") && urlStr.split("/").length === 2) {
+        const [owner, repo] = urlStr.split("/");
+        return { owner, repo };
+      }
+
+      const url = new URL(urlStr);
+      const parts = url.pathname.split("/").filter(Boolean);
+
+      if (parts.length >= 2) {
+        const owner = parts[0];
+        const repo = parts[1].replace(".git", "");
+        let branch: string | undefined;
+
+        // Check for /tree/BRANCH or /blob/BRANCH
+        const treeIndex = parts.indexOf("tree");
+        if (treeIndex !== -1 && treeIndex + 1 < parts.length) {
+          branch = parts.slice(treeIndex + 1).join("/");
+        } else {
+          // Also check for blob
+          const blobIndex = parts.indexOf("blob");
+          if (blobIndex !== -1 && blobIndex + 1 < parts.length) {
+            branch = parts.slice(blobIndex + 1).join("/");
+          }
+        }
+
+        return { owner, repo, branch };
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return {};
+  }
+
   private async createExecutionContext(
     taskId: string,
     request: TaskRequest
@@ -174,24 +207,41 @@ export class ClaudeExecutor {
 
     // Handle Repo Logic
     if (request.repoUrl) {
-      const branchName = `hotfix-${taskId}`;
-      const baseBranch = "main"; // Default base branch
+      let baseBranch = "main";
+      let branchName = `hotfix-${taskId}`;
+      let isExistingBranch = false;
 
+      // Check if URL specifies a branch (e.g., /tree/feature-branch)
       try {
-        // Try to create a hotfix branch
-        await this.githubService.createBranch(request.repoUrl, baseBranch, branchName);
+        const { branch } = this.parseDetailedRepoUrl(request.repoUrl);
+        if (branch) {
+          branchName = branch;
+          isExistingBranch = true;
+          console.log(`Verified branch from URL: ${branchName}`);
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+
+      if (!isExistingBranch) {
+        try {
+          // Try to create a hotfix branch
+          await this.githubService.createBranch(request.repoUrl, baseBranch, branchName);
+          featureBranch = branchName;
+          console.log(`Created feature branch: ${branchName}`);
+        } catch (error) {
+          console.warn(`Failed to create branch '${branchName}'. Will push to '${baseBranch}'. Error:`, error);
+          featureBranch = baseBranch;
+        }
+      } else {
         featureBranch = branchName;
-        console.log(`Created feature branch: ${branchName}`);
-      } catch (error) {
-        console.warn(`Failed to create branch '${branchName}'. Will push to '${baseBranch}'. Error:`, error);
-        featureBranch = baseBranch;
+        console.log(`Using existing branch: ${featureBranch}`);
       }
 
       try {
         const repoDir = join(taskDir, "repo");
-        // Download the repo from the feature branch we just created (or main if creation failed)
-        // downloadRepo returns the actual extracted folder path
-        workingDir = await this.githubService.downloadRepo(request.repoUrl, featureBranch, repoDir);
+        // Download the repo using the determined branch
+        workingDir = await this.githubService.downloadRepo(request.repoUrl, featureBranch || baseBranch, repoDir);
         console.log(`Working directory set to: ${workingDir}`);
       } catch (error) {
         console.error("Failed to download repo:", error);

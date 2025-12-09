@@ -5,8 +5,8 @@
   "main": "src/server.ts",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/dev-server.ts",
-    "dev:original": "tsx watch src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "dev:simple": "tsx src/dev-server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "start:dev": "tsx src/dev-server.ts",
@@ -17,13 +17,15 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.6",
+    "@hono/swagger-ui": "^0.5.2",
+    "@hono/zod-openapi": "^0.16.4",
     "@hono/zod-validator": "^0.2.0",
     "cron": "^3.1.0",
     "dotenv": "^17.2.3",
     "hono": "^4.0.0",
     "nanoid": "^5.0.0",
     "shell-quote": "^1.8.0",
-    "zod": "^3.22.0"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",
