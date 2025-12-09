@@ -184,10 +184,13 @@ export async function setupGitAndPush(
 
             onLog(`Pushing batch ${batchNumber}/${totalBatches} (${batch.length} files) to ${targetBranch}...`);
 
-            // Push to feature branch. Parent is main for the first batch (effectively branching off), 
-            // or we can strictly use the branch.
-            // If the server `pushChanges` is capable of handling "parentBranch" to create the branch if missing:
-            const parentBranch = i === 0 ? 'main' : targetBranch;
+            // Push to feature branch.
+            // If providedBranch is set, we are updating an existing branch, so parent must be the branch itself.
+            // If we created a new branch from scratch, the first batch's parent is main (to create the ref), subsequent are the branch.
+            let parentBranch = targetBranch;
+            if (!providedBranch && i === 0) {
+                parentBranch = 'main';
+            }
 
             await gh.pushChanges(username, repoName, `Update from task execution (Batch ${batchNumber})`, batch, targetBranch, parentBranch);
         }
