@@ -243,6 +243,11 @@ export class ClaudeExecutor {
         // Download the repo using the determined branch
         workingDir = await this.githubService.downloadRepo(request.repoUrl, featureBranch || baseBranch, repoDir);
         console.log(`Working directory set to: ${workingDir}`);
+
+        // Initialize git repo to assume baseline state
+        const { initializeGitRepo } = await import("./git-utils.js");
+        await initializeGitRepo(workingDir);
+
       } catch (error) {
         console.error("Failed to download repo:", error);
         throw new Error(`Failed to setup repository: ${error instanceof Error ? error.message : String(error)}`);

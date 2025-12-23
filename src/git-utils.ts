@@ -20,6 +20,33 @@ export interface PushOptions {
 }
 
 /**
+ * Initializes a git repository, adds all files, and creates an initial commit.
+ * This is used to establish a baseline for tracking changes made by the agent.
+ */
+export async function initializeGitRepo(cwd: string): Promise<void> {
+    try {
+        await execAsync('git init', { cwd });
+        await execAsync('git config user.email "bot@claude.ai"', { cwd });
+        await execAsync('git config user.name "Claude Bot"', { cwd });
+        // Check if there are files to commit
+        const { stdout } = await execAsync('git status --porcelain', { cwd });
+        if (stdout.trim()) {
+            await execAsync('git add .', { cwd });
+            await execAsync('git commit -m "Initial state"', { cwd });
+        } else {
+            // Even if empty, we might want an empty commit, but git usually requires changes. 
+            // If completely empty folder, we can skip commit or allow empty. 
+            // For now, let's just ensure it is an initialized repo.
+            await execAsync('git commit --allow-empty -m "Initial state"', { cwd });
+        }
+    } catch (error) {
+        console.warn('Warning: Failed to initialize git repo:', error);
+        // We don't throw here to avoid failing the whole task if git fails, 
+        // as the final push logic tries to handle things too.
+    }
+}
+
+/**
  * Recursively copies a directory, skipping .git directories.
  */
 export async function copyDirectory(src: string, dest: string): Promise<void> {
